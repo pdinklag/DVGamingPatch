@@ -16,16 +16,28 @@ class Patch:
             return (-1, -1)
 
 # replace BlockInteraction.DESTROY by BlockInteraction.NONE to make an explosion not destroy the world
-def makeNonDestroyingExplosion(code, start, end, mapping):
+def makeNonDestroyingExplosion(disableFire, code, scopeStart, scopeEnd, mapping):
     explosionBlockInteraction = mapping['net.minecraft.world.level.Explosion$BlockInteraction']
     _none = explosionBlockInteraction.fields['NONE']
     _destroy = explosionBlockInteraction.fields['DESTROY']
     
     q = 'getstatic Field ' + explosionBlockInteraction.obfs + ' ' + _destroy
-    start = code.find(q)
+    start = code.find(q, scopeStart, scopeEnd)
     if start >= 0:
         end = start + len(q)
-        return code[:start] + 'getstatic Field ' + explosionBlockInteraction.obfs + ' ' + _none + code[end:]
+        code = code[:start] + 'getstatic Field ' + explosionBlockInteraction.obfs + ' ' + _none + code[end:]
+        
+        if disableFire:
+            # also disable fire
+            fire = 'iconst_1'
+            fireStart = code.rfind(fire, scopeStart, start)
+            if fireStart >= 0:
+                fireEnd = fireStart + len(fire)
+                return code[:fireStart] + 'iconst_0' + code[fireEnd:]
+            else:
+                print('disableFire failed')
+        else:
+            return code
     else:
         print('makeNonDestroyingExplosion failed')
         return code
@@ -38,7 +50,7 @@ class CreeperPatch(Patch):
     def patch(self, code, mapping):
         (start, end) = self.findMethodBody('explodeCreeper : ()V', code, mapping)
         if start >= 0 and end > start:
-            return makeNonDestroyingExplosion(code, start, end, mapping)
+            return makeNonDestroyingExplosion(False, code, start, end, mapping)
         else:
             print('failed to find method to patch')
             return code
@@ -48,7 +60,7 @@ class BedExplosionPatchBase(Patch):
     def patch(self, code, mapping):
         (start, end) = self.findMethodBody('use : (Lnet.minecraft.world.level.block.state.BlockState;Lnet.minecraft.world.level.Level;Lnet.minecraft.core.BlockPos;Lnet.minecraft.world.entity.player.Player;Lnet.minecraft.world.InteractionHand;Lnet.minecraft.world.phys.BlockHitResult;)Lnet.minecraft.world.InteractionResult;', code, mapping)
         if start >= 0 and end > start:
-            return makeNonDestroyingExplosion(code, start, end, mapping)
+            return makeNonDestroyingExplosion(True, code, start, end, mapping)
         else:
             print('failed to find method to patch')
             return code
