@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import argparse
 import re
 import struct
@@ -14,39 +14,21 @@ from Krakatau.Krakatau.assembler.disassembly import Disassembler
 from Krakatau.Krakatau.assembler import parse
 from Krakatau.Krakatau.assembler.tokenize import Tokenizer
 
+import mapping
+
+from patches import *
+
 parser = argparse.ArgumentParser(description='DVGaming Minecraft patcher')
-parser.add_argument('server', help='Minecraft server JAR')
-parser.add_argument('output', help='Output patch JAR')
+parser.add_argument('server', help='the Minecraft server JAR')
+parser.add_argument('mapping', help='the corresponding obfuscation map')
+parser.add_argument('output', help='output patch JAR')
 parser.add_argument('-x', '--extract', action='store_true', help='extracts disassembly of unmodded class files')
 parser.add_argument('-y', '--extract-mod', action='store_true', help='extracts disassembly of modded class files')
 args = parser.parse_args()
 
-def read_index(cls):
-    # take a guess that this class is the one containing the Entity class registry
-    strings = dict()
-    i = 0
-    for i, x in enumerate(cls.pool.slots):
-        if x.tag == 'Utf8':
-            try:
-                strings[x.data.decode()] = i
-            except:
-                pass
+patches = [CreeperPatch(), BedPatch(), RespawnAnchorPatch()]
 
-    # simple heuristic:
-    # if the constant pool contains this set of strings, it's the index class
-    # works reliably for versions 1.12 through 1.14
-    if ('area_effect_cloud' in strings) and ('creeper' in strings) and ('zombie' in strings):
-        # another heuristic follows
-        # assume that we know the position of an entity ID string in the constant pool
-        # then the name of its class is two entries further in the pool
-        # this is because of how they are used in a static initializer
-        # works reliably for versions 1.12 through 1.14
-        return {
-            'Creeper': cls.pool.getutf(strings['creeper'] + 2).decode()
-        }
-    else:
-        return False
-
+# OBSOLETE
 def patch_creeper(cls, clsName):
     global args
     print('patching Creeper class: ' + clsName)
@@ -96,49 +78,71 @@ def patch_creeper(cls, clsName):
 
     return False
 
-# open original file
-with ZipFile(args.server, 'r') as server:
-    # find class name index first
-    idx = False
-    for item in server.infolist():
-        fname = item.filename
-        fdata = server.read(fname)
-        patched = False
+print('loading deobfuscation map ...', flush=True)
+classes = mapping.parse(args.mapping)
 
-        if fname.endswith('.class') and not '/' in fname:
-            cls = ClassData(Reader(fdata))
-            clsName = cls.pool.getclsutf(2).decode()
+# patch callbacks
+print('preparing patchers ...', flush=True)
 
-            idx = read_index(cls)
-            if idx:
-                break
-
-    # next, apply patches
-    patched = set()
-
-    if idx:
-        creeperClassName = idx['Creeper']
-        creeperClassFileName = creeperClassName + '.class'
-        creeperMod = patch_creeper(ClassData(Reader(server.read(creeperClassFileName))), creeperClassName)
-        if creeperMod:
-            patched.add(creeperClassFileName)
-        else:
-            print('failed to mod Creeper class, aborting')
-            exit(1)
+patchesByClass = dict()
+for patch in patches:
+    if patch.className in classes:
+        obfs = classes[patch.className].obfs
+        patchesByClass[obfs] = patch
     else:
-        print('failed to find class name index')
-        exit(1)
+        print('FAILED to register patch for unmapped class ' + patch.className)
 
-    # write mod
-    print('writing mod: ' + args.output)
+# patch queue
+class PatchQueueEntry:
+    def __init__(self, filename, classData, patcher):
+        self.filename = filename
+        self.classData = classData
+        self.patcher = patcher
+
+patchQueue = []
+
+# open server JAR
+print('processing server JAR ...', flush=True)
+with ZipFile(args.server, 'r') as server:
     with ZipFile(args.output, 'w') as mod:
         # preserve comment
         mod.comment = server.comment
-
-        # add mods
-        mod.writestr(creeperClassFileName, creeperMod)
-
-        # copy unmodded files
+        
+        # walk server files
         for item in server.infolist():
-            if not item.filename in patched:
-                mod.writestr(item, server.read(item.filename))
+            filename = item.filename
+            filedata = server.read(filename)
+            
+            if filename.endswith('.class') and not '/' in filename:
+                obfs = filename[:-6]
+                if obfs in patchesByClass:
+                    patcher = patchesByClass[obfs]
+                    print('    patching class ' + obfs + ' (' + patcher.className + ') ...', flush=True)
+                    
+                    # read class data
+                    cls = ClassData(Reader(server.read(filename)))
+                    
+                    # disassemble
+                    output = StringIO()
+                    Disassembler(cls, output.write, roundtrip=False).disassemble()
+                    code = output.getvalue()
+                    output = None
+                    
+                    # extract
+                    if args.extract:
+                        with open(obfs + '.j', 'wb') as f:
+                            f.write(code.encode('UTF-8'))
+                    
+                    # patch
+                    code = patcher.patch(code, classes)
+                    
+                    # extract mod
+                    if args.extract:
+                        with open(obfs + '.mod.j', 'wb') as f:
+                            f.write(code.encode('UTF-8'))
+                    
+                    # re-assemble
+                    filedata = list(parse.assemble(code, ''))[0][1]
+
+            # write to mod
+            mod.writestr(item, filedata)
