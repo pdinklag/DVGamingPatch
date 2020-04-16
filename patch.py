@@ -26,7 +26,7 @@ parser.add_argument('-x', '--extract', action='store_true', help='extracts disas
 parser.add_argument('-y', '--extract-mod', action='store_true', help='extracts disassembly of modded class files')
 args = parser.parse_args()
 
-patches = [CreeperPatch(), BedPatch(), RespawnAnchorPatch()]
+patches = [CreeperPatch(), RespawnAnchorPatch()]
 
 # OBSOLETE
 def patch_creeper(cls, clsName):
