@@ -28,56 +28,6 @@ args = parser.parse_args()
 
 patches = [CreeperPatch(), RespawnAnchorPatch()]
 
-# OBSOLETE
-def patch_creeper(cls, clsName):
-    global args
-    print('patching Creeper class: ' + clsName)
-
-    # disassemble
-    output = StringIO()
-    Disassembler(cls, output.write, roundtrip=False).disassemble()
-    code = output.getvalue()
-    output = None
-
-    # extract
-    if args.extract:
-        fname = clsName + '.j'
-        print('    extracting unmodded file ' + fname)
-        with open(fname, 'wb') as f:
-            f.write(code.encode('UTF-8'))
-
-    # find the Explode method
-    m = re.search('.method private (..) : \(\)V \n'
-                  '    .code stack 10 locals 3', code)
-    if m:
-        methodName = m.group(1)
-        methodStart = m.end()
-        methodEnd = code.find('.end code', methodStart)
-        if methodEnd > methodStart:
-            # we will now find the line where we conditionally get ExplosionType.DAMAGE_AND_DESTROY
-            # which is enum field c in (...)$a
-            pattern = re.compile('getstatic Field (...)\$a c L(...)\$a;')
-            m = pattern.search(code, methodStart, methodEnd)
-            if m:
-                # we want to replace this by ExplosionType.DAMAGE_ONLY
-                # which is enum field a
-                enumName = m.group(1)
-                assert enumName == m.group(2)
-
-                code = code[:m.start()] + 'getstatic Field ' + enumName + '$a a L' + enumName + '$a;' + code[m.end():]
-
-                # extract mod
-                if args.extract_mod:
-                    fname = clsName + '.mod.j'
-                    print('    extracting modded file ' + fname)
-                    with open(fname, 'wb') as f:
-                        f.write(code.encode('UTF-8'))
-
-                # re-assemble and return
-                return list(parse.assemble(code, ''))[0][1]
-
-    return False
-
 print('loading deobfuscation map ...', flush=True)
 classes = mapping.parse(args.mapping)
 
