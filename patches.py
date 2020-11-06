@@ -58,7 +58,7 @@ class CreeperPatch(Patch):
 # make bed or respawn anchor explosions not destroy the world
 class BedExplosionPatchBase(Patch):
     def patch(self, code, mapping):
-        (start, end) = self.findMethodBody('use : (Lnet.minecraft.world.level.block.state.BlockState;Lnet.minecraft.world.level.Level;Lnet.minecraft.core.BlockPos;Lnet.minecraft.world.entity.player.Player;Lnet.minecraft.world.InteractionHand;Lnet.minecraft.world.phys.BlockHitResult;)Lnet.minecraft.world.InteractionResult;', code, mapping)
+        (start, end) = self.findMethodBody('explode : (Lnet.minecraft.world.level.block.state.BlockState;Lnet.minecraft.world.level.Level;Lnet.minecraft.core.BlockPos;)V', code, mapping)
         if start >= 0 and end > start:
             return makeNonDestroyingExplosion(True, code, start, end, mapping)
         else:
